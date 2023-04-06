@@ -9,7 +9,7 @@
 | 名称           | 地址                                    | 推送策略                                             |
 |--------------|---------------------------------------|--------------------------------------------------|
 | 阿里云漏洞库       | https://avd.aliyun.com/high-risk/list | 等级为高危或严重                                         |
-| OSCS开源安全情报预警 | https://www.oscs1024.com/cm           | 等级为严重**或者**包含 `预警` 标签                            |
+| OSCS开源安全情报预警 | https://www.oscs1024.com/cm           | 等级为严重**并且**包含 `预警` 标签                            |
 | 奇安信威胁情报中心    | https://ti.qianxin.com/vulnerability  | 等级为高危严重**并且**包含 `奇安信CERT验证` `POC公开` `技术细节公布`标签之一 |
 
 > 如果有侵权，请提交 issue, 我会删除相关源。
@@ -29,6 +29,7 @@
 - [钉钉群组机器人](https://open.dingtalk.com/document/robots/custom-robot-access)
 - [微信企业版群组机器人](https://open.work.weixin.qq.com/help2/pc/14931)
 - [飞书群组机器人](https://open.feishu.cn/document/ukTMukTMukTM/ucTM5YjL3ETO24yNxkjN)
+- [server酱](https://sct.ftqq.com/)
 - [自定义Webhook服务](./examples/webhook)
 - [server酱](https://sct.ftqq.com/)
 
@@ -43,9 +44,11 @@ Docker 方式推荐使用环境变量来配置服务参数
 | `LARK_ACCESS_TOKEN`     | 飞书机器人 url 的 `/open-apis/bot/v2/hook/` 后的部分 |               |
 | `LARK_SECRET`           | 飞书机器人的加签值 （仅支持加签方式）                        |               |
 | `WECHATWORK_KEY `       | 微信机器人 url 的 `key` 部分                       |               |
+| `SERVERCHAN_KEY `       | Server酱的 `SCKEY`                           |               |
 | `WEBHOOK_URL`           | 自定义 webhook 服务的完整 url                      |               |
 | `SOURCES`               | 启用哪些漏洞信息源，逗号分隔, 可选 `avd`, `ti`, `oscs`     | `avd,ti,oscs` |
 | `INTERVAL`              | 检查周期，支持秒 `60s`, 分钟 `10m`, 小时 `1h`, 最低 `1m` | `30m`         |
+| `ENABLE_CVE_FILTER`     | 启用 CVE 过滤，开启后多个数据源的统一 CVE 将只推送一次           | `false`       |
 | `NO_FILTER`             | 禁用上述推送过滤策略，所有新发现的漏洞都会被推送                   | `false`       |
 | `NO_START_MESSAGE`      | 禁用服务启动的提示信息                                | `false`       |
 
@@ -56,6 +59,7 @@ docker run --restart always -d \
   -e DINGDING_ACCESS_TOKEN=xxxx \
   -e DINGDING_SECRET=xxxx \
   -e INTERVAL=30m \
+  -e ENABLE_CVE_FILTER=true \
   zemal/watchvuln:latest
 ```
 
@@ -143,7 +147,7 @@ USAGE:
    watchvuln [global options] command [command options] [arguments...]
 
 VERSION:
-   v0.3.1
+   v0.4.0
 
 COMMANDS:
    help, h  Shows a list of commands or help for one command
@@ -159,6 +163,7 @@ GLOBAL OPTIONS:
    --lark-sign-secret value, --ls value       sign secret of lark
    --webhook-url value, --webhook value       your webhook server url, ex: http://127.0.0.1:1111/webhook
    --serverchan-key value, --sk value         send key for server chan
+   --enable-cve-filter                        enable a filter that vulns from multiple sources with same cve id will be sent only once (default: false)
    --no-start-message, --nm                   disable the hello message when server starts (default: false)
    --no-filter, --nf                          ignore the valuable filter and push all discovered vulns (default: false)
    --help, -h                                 show help
@@ -188,6 +193,15 @@ $ ./watchvuln --wk WECHATWORK_KEY -i 30m
 
 </details>
 
+<details><summary>使用server酱机器人</summary>
+
+```
+$ ./watchvuln --sk xxxx -i 30m
+```
+
+</details>
+
+
 <details><summary>使用自定义 Webhook 服务</summary>
 
 通过自定义一个 webhook server，可以方便的接入其他服务, 实现方式可以参考: [example](./examples/webhook)
@@ -197,6 +211,7 @@ $ ./watchvuln --webhook http://xxxx -i 30m
 ```
 
 </details>
+
 
 <details><summary>使用多种服务</summary>
 
