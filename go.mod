@@ -6,6 +6,8 @@ require (
 	entgo.io/ent v0.11.10
 	github.com/CatchZeng/dingtalk v1.5.0
 	github.com/PuerkitoBio/goquery v1.8.1
+	github.com/chromedp/cdproto v0.0.0-20230408222125-26b95782d8e2
+	github.com/chromedp/chromedp v0.9.1
 	github.com/imroc/req/v3 v3.33.1
 	github.com/kataras/golog v0.1.8
 	github.com/larksuite/oapi-sdk-go/v2 v2.0.11
@@ -23,10 +25,14 @@ require (
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
+	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0 // indirect
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
+	github.com/gobwas/ws v1.1.0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/pprof v0.0.0-20221118152302-e6195bd50e26 // indirect
@@ -34,8 +40,10 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/hcl/v2 v2.13.0 // indirect
+	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kataras/pio v0.0.11 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.18 // indirect
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7 // indirect
 	github.com/onsi/ginkgo/v2 v2.2.0 // indirect
