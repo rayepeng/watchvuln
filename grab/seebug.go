@@ -1,7 +1,6 @@
 package grab
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -9,16 +8,13 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
 	"github.com/imroc/req/v3"
 	"github.com/kataras/golog"
-	"golang.org/x/net/html"
 )
 
 var (
@@ -90,10 +86,10 @@ func (a *SeeBugCrawler) GetPageCount(ctx context.Context, _ int) (int, error) {
 	u := `https://www.seebug.org/vuldb/vulnerabilities`
 	instance := NewChromedpInstance()
 	var page_count []*cdp.Node
-	err := chromedp.Run(instance, 
-		chromedp.Navigate("https://www.seebug.org/vuldb/vulnerabilities"),
+	err := chromedp.Run(instance,
+		chromedp.Navigate(u),
 		chromedp.WaitVisible(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, chromedp.BySearch),
-		chromedp.Nodes(`/html/body/div[2]/div/div/nav/ul/li[last()-1]/a/text()`, &page_count, chromedp.BySearch)
+		chromedp.Nodes(`/html/body/div[2]/div/div/nav/ul/li[last()-1]/a/text()`, &page_count, chromedp.BySearch),
 	)
 	if err != nil {
 		return 0, err
@@ -106,41 +102,24 @@ func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnI
 	u := fmt.Sprintf("https://www.seebug.org/vuldb/vulnerabilities?page=%d", page)
 	a.log.Infof("parsing page %s", u)
 	// resp, err := a.client.R().SetContext(ctx).Get(u)
-	instance := NewChromedpInstance()
+	instance = NewChromedpInstance()
+	var nodes []*cdp.Node
+	err := chromedp.Run(instance,
+		chromedp.Navigate("https://www.seebug.org/vuldb/vulnerabilities"),
+		chromedp.WaitVisible(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, chromedp.BySearch),
+		chromedp.Nodes(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, &hrefs, chromedp.BySearch),
+	)
 	if err != nil {
+		a.log.Error("parsing page error")
 		return nil, err
 	}
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Bytes()))
-	if err != nil {
-		return nil, err
-	}
-	sel := doc.Find("tbody > tr")
-	count := sel.Length()
-	if count == 0 {
-		return nil, fmt.Errorf("goquery find zero vulns")
-	}
-	a.log.Infof("page %d contains %d vulns", page, count)
-
-	hrefs := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		linkSel := sel.Eq(i).Find("td > a")
-		if linkSel.Length() != 1 {
-			return nil, fmt.Errorf("can't find a tag")
-		}
-
-		linkTag := linkSel.Get(0)
-		for _, attr := range linkTag.Attr {
-			if attr.Key == "href" {
-				hrefs = append(hrefs, attr.Val)
-				break
-			}
+	var hrefs []string
+	for _, node := range nodes {
+		href := node.AttributeValue("href")
+		if href != "" {
+			hrefs = append(hrefs, href)
 		}
 	}
-
-	if len(hrefs) != count {
-		return nil, fmt.Errorf("can't get all href")
-	}
-
 	results := make(chan *VulnInfo, 1)
 	go func() {
 		defer close(results)
@@ -150,7 +129,7 @@ func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnI
 				return
 			default:
 			}
-			base, _ := url.Parse("https://avd.aliyun.com/")
+			base, _ := url.Parse("https://www.seebug.org/")
 			uri, err := url.ParseRequestURI(href)
 			if err != nil {
 				a.log.Errorf("%s", err)
@@ -175,15 +154,36 @@ func (a *SeeBugCrawler) IsValuable(info *VulnInfo) bool {
 
 func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*VulnInfo, error) {
 	a.log.Debugf("parsing vuln %s", vulnLink)
-	resp, err := a.client.R().SetContext(ctx).Get(vulnLink)
-	if err != nil {
-		return nil, err
-	}
+	// resp, err := a.client.R().SetContext(ctx).Get(vulnLink)
+	instance = NewChromedpInstance()
 
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Bytes()))
+	var title_node []*cdp.Node
+	var description_node []*cdp.Node
+	var cveID_node []*cdp.Node
+	var level_node []*cdp.Node
+	var disclosure_node []*cdp.Node
+	var avd_node []*cdp.Node
+	var refs_node []*cdp.Node
+	var tags_node []*cdp.Node
+
+	err := chromedp.Run(instance,
+		chromedp.Navigate(vulnLink),
+		chromedp.WaitVisible(`//*[@id="j-vul-title"]/span`, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-vul-title"]/span/text()`, &title_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-affix-target"]/div[2]/div[1]/section[2]/div[2]/div[2]/p[2]/text()`, &description_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[3]/dl[1]/dd/a/text()`, &cveID_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[4]/dd/div`, &level_node, chromedp.BySearch), // 解析 data-original-title
+		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[3]/dl[1]/dd/a/text()`, &cveID_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[3]/dd/text()`, &disclosure_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[1]/dd/a/text()`, &avd_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-affix-target"]/div[2]/div[1]/section[4]/div/div/div/ul/li[*]/a/text()`, &refs_node, chromedp.BySearch),
+		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[2]/dl[1]/dd/a/text()`, &tags_node, chromedp.BySearch),
+	)
+
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
+	//TODO： 继续解析
 
 	title := ""
 	description := ""
@@ -194,93 +194,19 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 	avd := ""
 	var refs []string
 
-	// parse avd id
-	u, _ := url.Parse(vulnLink)
-	avd = strings.TrimSpace(u.Query().Get("id"))
-
-	metaSel := doc.Find(`div[class="metric"]`)
-	for i := 0; i < metaSel.Length(); i++ {
-		metric := metaSel.Eq(i)
-		label := metric.Find(".metric-label").Text()
-		value := metric.Find(".metric-value").Text()
-		label = strings.TrimSpace(label)
-		value = strings.TrimSpace(value)
-
-		if strings.HasPrefix(label, "CVE") {
-			cveID = value
-		} else if strings.HasSuffix(label, "披露时间") {
-			disclosure = value
-		} else {
+	title = title_node[0].NodeValue
+	description = description_node[0].NodeValue
+	level = level_node[0].AttributeValue("data-original-title")
+	cveID = cveID_node[0].NodeValue
+	disclosure = disclosure_node[0].NodeValue
+	avd = avd_node[0].NodeValue
+	for _, ref := range refs_node {
+		ref_link := ref.NodeValue
+		if ref_link != "" {
+			refs = append(refs, ref_link)
 		}
 	}
 
-	// validate
-	if !cveIDRegexp.MatchString(cveID) {
-		cveID = ""
-		a.log.Debugf("cve id not found in %s", vulnLink)
-	}
-
-	_, err = time.Parse("2006-01-02", disclosure)
-	if err != nil {
-		disclosure = ""
-	}
-
-	if cveID == "" && disclosure == "" {
-		// 数据有问题，不可能两个都是空的
-		return nil, fmt.Errorf("invalid vuln data")
-	}
-
-	// parse title
-	header := doc.Find(`h5[class="header__title"]`)
-	level = header.Find(".badge").Text()
-	level = strings.TrimSpace(level)
-	title = header.Find(".header__title__text").Text()
-	title = strings.TrimSpace(title)
-
-	// parse main content
-	mainContent := doc.Find(`div[class="py-4 pl-4 pr-4 px-2 bg-white rounded shadow-sm"]`).Children()
-	for i := 0; i < mainContent.Length(); {
-		sentinel := mainContent.Eq(i).Text()
-		sentinel = strings.TrimSpace(sentinel)
-
-		if sentinel == "漏洞描述" && i+1 < mainContent.Length() {
-			description = mainContent.Eq(i + 1).Find("div").Eq(0).Text()
-			description = strings.TrimSpace(description)
-			i += 2
-		} else if sentinel == "解决建议" && i+1 < mainContent.Length() {
-			if mainContent.Eq(i+1).Length() != 1 {
-				i += 2
-				continue
-			}
-			// 解决一下换行问题
-			innerNode := mainContent.Eq(i + 1).Nodes[0].FirstChild
-			for ; innerNode != nil; innerNode = innerNode.NextSibling {
-				if innerNode.Type != html.TextNode {
-					continue
-				}
-				t := strings.TrimSpace(innerNode.Data)
-				if t != "" {
-					fixSteps += t + "\n"
-				}
-			}
-			fixSteps = strings.TrimSpace(fixSteps)
-			fixSteps = strings.ReplaceAll(fixSteps, "、", ". ")
-			i += 2
-		} else {
-			i += 1
-		}
-	}
-	refTags := mainContent.Find(`div.reference tbody > tr a`)
-	for i := 0; i < refTags.Length(); i++ {
-		refText, exist := refTags.Eq(i).Attr("href")
-		if !exist {
-			continue
-		}
-		refText = strings.TrimSpace(refText)
-		if strings.HasPrefix(refText, "http") {
-			refs = append(refs, refText)
-		}
-	}
 	severity := Low
 	switch level {
 	case "低危":
