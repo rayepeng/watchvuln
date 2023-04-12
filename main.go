@@ -317,6 +317,9 @@ func initSources(c *cli.Context) ([]grab.Grabber, int, error) {
 		case "oscs":
 			countApproximately += 90 * 10
 			grabs = append(grabs, grab.NewOSCSCrawler())
+		case "seebug":
+			countApproximately += 90 * 10
+			grabs = append(grabs, grab.NewSeeBugCrawler())
 		default:
 			return nil, 0, fmt.Errorf("invalid grab source %s", part)
 		}

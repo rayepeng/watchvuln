@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -18,50 +17,61 @@ import (
 )
 
 var (
-	instance      context.Context
-	once          sync.Once
-	instanceMutex sync.Mutex
+	opts = append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+		chromedp.Flag("headless", true), // 设置为false以取消无头模式
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("enable-automation", true),
+		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("disable-software-rasterizer", true),
+		chromedp.Flag("disable-popup-blocking", true),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.UserDataDir(""),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"),
+	)
 )
 
 // TODO: 这个函数可能有bug，资源不一定释放掉 加个err
-func NewChromedpInstance() context.Context {
-	once.Do(func() {
-		instanceMutex.Lock()
-		defer instanceMutex.Unlock()
+// func NewChromedpInstance() context.Context {
+// 	once.Do(func() {
+// 		instanceMutex.Lock()
+// 		defer instanceMutex.Unlock()
 
-		userDataDir, err := ioutil.TempDir("", "chromedp_example")
-		if err != nil {
-			log.Fatal(err)
-		}
-		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoFirstRun,
-			chromedp.NoDefaultBrowserCheck,
-			chromedp.Flag("headless", true), // 设置为false以取消无头模式
-			chromedp.Flag("disable-gpu", true),
-			chromedp.Flag("enable-automation", true),
-			chromedp.Flag("disable-extensions", true),
-			chromedp.Flag("disable-dev-shm-usage", true),
-			chromedp.Flag("disable-software-rasterizer", true),
-			chromedp.Flag("disable-popup-blocking", true),
-			chromedp.Flag("disable-blink-features", "AutomationControlled"),
-			chromedp.UserDataDir(""),
-			chromedp.UserDataDir(userDataDir),
-			chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"),
-		)
-		allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-		ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-		instance = ctx
-		// 在程序退出时取消context
-		go func() {
-			<-ctx.Done()
-			cancel()
-			os.RemoveAll(userDataDir)
-		}()
-	})
+// userDataDir, err := ioutil.TempDir("", "chromedp_example")
+// if err != nil {
+// 	log.Fatal(err)
+// }
+// 		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+// 			chromedp.NoFirstRun,
+// 			chromedp.NoDefaultBrowserCheck,
+// 			chromedp.Flag("headless", true), // 设置为false以取消无头模式
+// 			chromedp.Flag("disable-gpu", true),
+// 			chromedp.Flag("enable-automation", true),
+// 			chromedp.Flag("disable-extensions", true),
+// 			chromedp.Flag("disable-dev-shm-usage", true),
+// 			chromedp.Flag("disable-software-rasterizer", true),
+// 			chromedp.Flag("disable-popup-blocking", true),
+// 			chromedp.Flag("disable-blink-features", "AutomationControlled"),
+// 			chromedp.UserDataDir(""),
+// chromedp.UserDataDir(userDataDir),
+// 			chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"),
+// 		)
+// allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+// ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
+// ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+// 		instance = ctx
+// 		// 在程序退出时取消context
+// 		go func() {
+// 			<-ctx.Done()
+// 			cancel()
+// 			os.RemoveAll(userDataDir)
+// 		}()
+// 	})
 
-	return instance
-}
+// 	return instance
+// }
 
 type SeeBugCrawler struct {
 	client *req.Client
@@ -84,9 +94,20 @@ func (a *SeeBugCrawler) ProviderInfo() *Provider {
 }
 func (a *SeeBugCrawler) GetPageCount(ctx context.Context, _ int) (int, error) {
 	u := `https://www.seebug.org/vuldb/vulnerabilities`
-	instance := NewChromedpInstance()
+	userDataDir, err := ioutil.TempDir("", "chromedp_example")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(userDataDir)
+	opts = append(opts, chromedp.UserDataDir(userDataDir))
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
+	defer cancel()
+	instance, cancel = context.WithTimeout(instance, 30*time.Second)
+	defer cancel()
 	var page_count []*cdp.Node
-	err := chromedp.Run(instance,
+	err = chromedp.Run(instance,
 		chromedp.Navigate(u),
 		chromedp.WaitVisible(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, chromedp.BySearch),
 		chromedp.Nodes(`/html/body/div[2]/div/div/nav/ul/li[last()-1]/a/text()`, &page_count, chromedp.BySearch),
@@ -101,16 +122,26 @@ func (a *SeeBugCrawler) GetPageCount(ctx context.Context, _ int) (int, error) {
 func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnInfo, error) {
 	u := fmt.Sprintf("https://www.seebug.org/vuldb/vulnerabilities?page=%d", page)
 	a.log.Infof("parsing page %s", u)
-	// resp, err := a.client.R().SetContext(ctx).Get(u)
-	instance = NewChromedpInstance()
+	userDataDir, err := ioutil.TempDir("", "chromedp_example")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(userDataDir)
+	opts = append(opts, chromedp.UserDataDir(userDataDir))
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
+	defer cancel()
+	instance, cancel = context.WithTimeout(instance, 60*time.Second)
+	defer cancel()
 	var nodes []*cdp.Node
-	err := chromedp.Run(instance,
+	err = chromedp.Run(instance,
 		chromedp.Navigate("https://www.seebug.org/vuldb/vulnerabilities"),
 		chromedp.WaitVisible(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, chromedp.BySearch),
-		chromedp.Nodes(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, &hrefs, chromedp.BySearch),
+		chromedp.Nodes(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, &nodes, chromedp.BySearch),
 	)
 	if err != nil {
-		a.log.Error("parsing page error")
+		a.log.Errorf("parsing %s page error %s", u, err.Error())
 		return nil, err
 	}
 	var hrefs []string
@@ -155,8 +186,18 @@ func (a *SeeBugCrawler) IsValuable(info *VulnInfo) bool {
 func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*VulnInfo, error) {
 	a.log.Debugf("parsing vuln %s", vulnLink)
 	// resp, err := a.client.R().SetContext(ctx).Get(vulnLink)
-	instance = NewChromedpInstance()
-
+	userDataDir, err := ioutil.TempDir("", "chromedp_example")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.RemoveAll(userDataDir)
+	opts = append(opts, chromedp.UserDataDir(userDataDir))
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
+	defer cancel()
+	instance, cancel = context.WithTimeout(instance, 60*time.Second)
+	defer cancel()
 	var title_node []*cdp.Node
 	var description_node []*cdp.Node
 	var cveID_node []*cdp.Node
@@ -166,7 +207,7 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 	var refs_node []*cdp.Node
 	var tags_node []*cdp.Node
 
-	err := chromedp.Run(instance,
+	err = chromedp.Run(instance,
 		chromedp.Navigate(vulnLink),
 		chromedp.WaitVisible(`//*[@id="j-vul-title"]/span`, chromedp.BySearch),
 		chromedp.Nodes(`//*[@id="j-vul-title"]/span/text()`, &title_node, chromedp.BySearch),
