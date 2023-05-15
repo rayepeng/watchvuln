@@ -28,82 +28,111 @@ func init() {
 }
 
 var log = golog.Child("[main]")
-var Version = "v0.5.0"
+var Version = "v0.9.0"
+
+const MaxPageBase = 3
 
 func main() {
 	golog.Default.SetLevel("info")
+	cli.VersionFlag = &cli.BoolFlag{
+		Name:     "version",
+		Aliases:  []string{"v"},
+		Usage:    "print the version",
+		Category: "[Other Options]",
+	}
+	cli.HelpFlag = &cli.BoolFlag{
+		Name:     "help",
+		Aliases:  []string{"h"},
+		Usage:    "show help",
+		Category: "[Other Options]",
+	}
+
 	app := cli.NewApp()
 	app.Name = "watchvuln"
 	app.Usage = "A high valuable vulnerability watcher and pusher"
 	app.Version = Version
 
 	app.Flags = []cli.Flag{
-		&cli.BoolFlag{
-			Name:    "debug",
-			Aliases: []string{"d"},
-			Usage:   "set log level to debug, print more details",
-			Value:   false,
+		&cli.StringFlag{
+			Name:     "dingding-access-token",
+			Aliases:  []string{"dt"},
+			Usage:    "webhook access token of dingding bot",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "sources",
-			Aliases: []string{"s"},
-			Usage:   "set vuln sources",
-			Value:   "avd,ti,oscs",
+			Name:     "dingding-sign-secret",
+			Aliases:  []string{"ds"},
+			Usage:    "sign secret of dingding bot",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "interval",
-			Aliases: []string{"i"},
-			Usage:   "checking every [interval], supported format like 30s, 30m, 1h",
-			Value:   "30m",
+			Name:     "wechatwork-key",
+			Aliases:  []string{"wk"},
+			Usage:    "webhook key of wechat work",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "dingding-access-token",
-			Aliases: []string{"dt"},
-			Usage:   "webhook access token of dingding bot",
+			Name:     "lark-access-token",
+			Aliases:  []string{"lt"},
+			Usage:    "webhook access token of lark",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "dingding-sign-secret",
-			Aliases: []string{"ds"},
-			Usage:   "sign secret of dingding bot",
+			Name:     "lark-sign-secret",
+			Aliases:  []string{"ls"},
+			Usage:    "sign secret of lark",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "wechatwork-key",
-			Aliases: []string{"wk"},
-			Usage:   "webhook key of wechat work",
+			Name:     "serverchan-key",
+			Aliases:  []string{"sk"},
+			Usage:    "send key for server chan",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "lark-access-token",
-			Aliases: []string{"lt"},
-			Usage:   "webhook access token of lark",
+			Name:     "webhook-url",
+			Aliases:  []string{"webhook"},
+			Usage:    "your webhook server url, ex: http://127.0.0.1:1111/webhook",
+			Category: "[\x00Push Options]",
 		},
 		&cli.StringFlag{
-			Name:    "lark-sign-secret",
-			Aliases: []string{"ls"},
-			Usage:   "sign secret of lark",
+			Name:     "sources",
+			Aliases:  []string{"s"},
+			Usage:    "set vuln sources",
+			Value:    "avd,ti,oscs,seebug",
+			Category: "[Launch Options]",
 		},
 		&cli.StringFlag{
-			Name:    "webhook-url",
-			Aliases: []string{"webhook"},
-			Usage:   "your webhook server url, ex: http://127.0.0.1:1111/webhook",
-		},
-		&cli.StringFlag{
-			Name:    "serverchan-key",
-			Aliases: []string{"sk"},
-			Usage:   "send key for server chan",
-		},
-		&cli.BoolFlag{
-			Name:  "enable-cve-filter",
-			Usage: "enable a filter that vulns from multiple sources with same cve id will be sent only once",
-		},
-		&cli.BoolFlag{
-			Name:    "no-start-message",
-			Aliases: []string{"nm"},
-			Usage:   "disable the hello message when server starts",
+			Name:     "interval",
+			Aliases:  []string{"i"},
+			Usage:    "checking every [interval], supported format like 30s, 30m, 1h",
+			Value:    "30m",
+			Category: "[Launch Options]",
 		},
 		&cli.BoolFlag{
-			Name:    "no-filter",
-			Aliases: []string{"nf"},
-			Usage:   "ignore the valuable filter and push all discovered vulns",
+			Name:     "enable-cve-filter",
+			Usage:    "enable a filter that vulns from multiple sources with same cve id will be sent only once",
+			Value:    true,
+			Category: "[Launch Options]",
+		},
+		&cli.BoolFlag{
+			Name:     "no-start-message",
+			Aliases:  []string{"nm"},
+			Usage:    "disable the hello message when server starts",
+			Category: "[Launch Options]",
+		},
+		&cli.BoolFlag{
+			Name:     "no-filter",
+			Aliases:  []string{"nf"},
+			Usage:    "ignore the valuable filter and push all discovered vulns",
+			Category: "[Launch Options]",
+		},
+		&cli.BoolFlag{
+			Name:     "debug",
+			Aliases:  []string{"d"},
+			Usage:    "set log level to debug, print more details",
+			Value:    false,
+			Category: "[Other Options]",
 		},
 	}
 	app.Before = func(c *cli.Context) error {
@@ -116,7 +145,11 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Fatal(err)
+		if errors.Is(err, context.Canceled) {
+			log.Fatal("user canceled")
+		} else {
+			log.Fatal(err)
+		}
 	}
 }
 
@@ -128,7 +161,7 @@ func Action(c *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	grabbers, vulnCountAtLeast, err := initSources(c)
+	grabbers, err := initSources(c)
 	if err != nil {
 		return err
 	}
@@ -148,9 +181,12 @@ func Action(c *cli.Context) error {
 	if os.Getenv("NO_START_MESSAGE") != "" {
 		noStartMessage = true
 	}
-	if os.Getenv("ENABLE_CVE_FILTER") != "" {
-		cveFilter = true
+	if os.Getenv("ENABLE_CVE_FILTER") == "false" {
+		cveFilter = false
 	}
+
+	log.Infof("config: INTERVAL=%s, NO_FILTER=%v, NO_START_MESSAGE=%v, ENABLE_CVE_FILTER=%v",
+		iv, noFilter, noStartMessage, cveFilter)
 
 	interval, err := time.ParseDuration(iv)
 	if err != nil {
@@ -160,7 +196,7 @@ func Action(c *cli.Context) error {
 		return fmt.Errorf("interval is too small, at least 1m")
 	}
 
-	drv, err := entSql.Open("sqlite3", "file:vuln_v1.sqlite3?cache=shared&_pragma=foreign_keys(1)")
+	drv, err := entSql.Open("sqlite3", "file:vuln_v2.sqlite3?cache=shared&_pragma=foreign_keys(1)")
 	if err != nil {
 		return errors.Wrap(err, "failed opening connection to sqlite")
 	}
@@ -173,36 +209,27 @@ func Action(c *cli.Context) error {
 		return errors.Wrap(err, "failed creating schema resources")
 	}
 
-	count, err := dbClient.VulnInformation.Query().Count(ctx)
+	log.Infof("initialize local database..")
+	// 抓取前3页作为基准漏洞数据
+	eg, initCtx := errgroup.WithContext(ctx)
+	eg.SetLimit(len(grabbers))
+	for _, grabber := range grabbers {
+		grabber := grabber
+		eg.Go(func() error {
+			return initData(initCtx, dbClient, grabber)
+		})
+	}
+	err = eg.Wait()
 	if err != nil {
-		return errors.Wrap(err, "failed creating schema resources")
+		return errors.Wrap(err, "init data")
 	}
-	log.Infof("local database has %d vulns", count)
-	if count < vulnCountAtLeast {
-		log.Infof("local data is outdated, init database")
-		eg, initCtx := errgroup.WithContext(ctx)
-		eg.SetLimit(len(grabbers))
-		for _, grabber := range grabbers {
-			grabber := grabber
-			eg.Go(func() error {
-				return initData(initCtx, dbClient, grabber)
-			})
-		}
-		err = eg.Wait()
-		if err != nil {
-			return errors.Wrap(err, "init data")
-		}
-		log.Infof("grabber finished successfully")
-	}
+	log.Infof("grabber finished successfully")
 
-	// 初次启动不要推送数据, 以免长时间没运行狂发消息
-	vulns, err := collectUpdate(ctx, dbClient, grabbers)
+	localCount, err := dbClient.VulnInformation.Query().Count(ctx)
 	if err != nil {
-		return errors.Wrap(err, "initial collect")
+		return err
 	}
-
-	localCount := dbClient.VulnInformation.Query().CountX(ctx)
-	log.Infof("local database has %d vulns", localCount)
+	log.Infof("system init finished, local database has %d vulns", localCount)
 	if !noStartMessage {
 		providers := make([]*grab.Provider, 0, 3)
 		for _, p := range grabbers {
@@ -220,7 +247,6 @@ func Action(c *cli.Context) error {
 		}
 	}
 
-	log.Infof("system init finished, found %d new vulns (skip pushing)", len(vulns))
 	log.Infof("ticking every %s", interval)
 
 	defer func() {
@@ -246,7 +272,7 @@ func Action(c *cli.Context) error {
 				continue
 			}
 
-			vulns, err = collectUpdate(ctx, dbClient, grabbers)
+			vulns, err := collectUpdate(ctx, dbClient, grabbers)
 			if err != nil {
 				log.Errorf("failed to get updates, %s", err)
 				continue
@@ -254,13 +280,13 @@ func Action(c *cli.Context) error {
 			log.Infof("found %d new vulns in this ticking", len(vulns))
 			for _, v := range vulns {
 				if noFilter || v.Creator.IsValuable(v) {
-					log.Infof("publishing new vuln %s", v)
 					dbVuln, err := dbClient.VulnInformation.Query().Where(vulninformation.Key(v.UniqueKey)).First(ctx)
 					if err != nil {
 						log.Errorf("failed to query %s from db %s", v.UniqueKey, err)
 						continue
 					}
 					if dbVuln.Pushed {
+						log.Infof("%s has been pushed, skipped", v)
 						continue
 					}
 					if v.CVE != "" && cveFilter {
@@ -285,7 +311,7 @@ func Action(c *cli.Context) error {
 						log.Errorf("failed to save pushed %s status, %s", v.UniqueKey, err)
 						continue
 					}
-
+					log.Infof("Pushing %s", v)
 					err = pusher.PushMarkdown(v.Title, push.RenderVulnInfo(v))
 					if err != nil {
 						log.Errorf("send dingding msg error, %s", err)
@@ -297,34 +323,29 @@ func Action(c *cli.Context) error {
 	}
 }
 
-func initSources(c *cli.Context) ([]grab.Grabber, int, error) {
+func initSources(c *cli.Context) ([]grab.Grabber, error) {
 	sources := c.String("sources")
 	if os.Getenv("SOURCES") != "" {
 		sources = os.Getenv("SOURCES")
 	}
 	parts := strings.Split(sources, ",")
 	var grabs []grab.Grabber
-	var countApproximately int
 	for _, part := range parts {
 		part = strings.ToLower(strings.TrimSpace(part))
 		switch part {
 		case "avd":
-			countApproximately += 1200
 			grabs = append(grabs, grab.NewAVDCrawler())
 		case "ti":
-			countApproximately += 27000
 			grabs = append(grabs, grab.NewTiCrawler())
 		case "oscs":
-			countApproximately += 90 * 10
 			grabs = append(grabs, grab.NewOSCSCrawler())
 		case "seebug":
-			countApproximately += 90 * 10
-			grabs = append(grabs, grab.NewSeeBugCrawler())
+			grabs = append(grabs, grab.NewSeebugCrawler())
 		default:
-			return nil, 0, fmt.Errorf("invalid grab source %s", part)
+			return nil, fmt.Errorf("invalid grab source %s", part)
 		}
 	}
-	return grabs, countApproximately, nil
+	return grabs, nil
 }
 
 func initPusher(c *cli.Context) (push.Pusher, error) {
@@ -390,10 +411,16 @@ func initData(ctx context.Context, dbClient *ent.Client, grabber grab.Grabber) e
 	if err != nil {
 		return nil
 	}
-	log.Infof("%s total page: %d", source.Name, total)
+	if total == 0 {
+		return fmt.Errorf("%s got unexpected zero page", source.Name)
+	}
+	if total > MaxPageBase {
+		total = MaxPageBase
+	}
+	log.Infof("start grab %s, total page: %d", source.Name, total)
 
 	eg, ctx := errgroup.WithContext(ctx)
-	eg.SetLimit(20)
+	eg.SetLimit(total)
 
 	for i := 1; i <= total; i++ {
 		i := i
@@ -432,6 +459,9 @@ func collectUpdate(ctx context.Context, dbClient *ent.Client, grabbers []grab.Gr
 			pageCount, err := grabber.GetPageCount(ctx, pageSize)
 			if err != nil {
 				return err
+			}
+			if pageCount > MaxPageBase {
+				pageCount = MaxPageBase
 			}
 			for i := 1; i <= pageCount; i++ {
 				dataChan, err := grabber.ParsePage(ctx, i, pageSize)
@@ -483,6 +513,7 @@ func createOrUpdate(ctx context.Context, dbClient *ent.Client, source *grab.Prov
 			SetDisclosure(data.Disclosure).
 			SetSolutions(data.Solutions).
 			SetReferences(data.References).
+			SetPushed(false).
 			SetTags(data.Tags).
 			SetFrom(data.From).
 			Save(ctx)
@@ -513,6 +544,7 @@ func createOrUpdate(ctx context.Context, dbClient *ent.Client, source *grab.Prov
 			log.Infof("%s from %s add new tag %s", data.Title, data.From, newTag)
 			data.Reason = append(data.Reason, fmt.Sprintf("%s: %v => %v", grab.ReasonTagUpdated, vuln.Tags, data.Tags))
 			asNewVuln = true
+			break
 		}
 	}
 

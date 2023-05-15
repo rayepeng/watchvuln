@@ -3,6 +3,7 @@ package grab
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/imroc/req/v3"
@@ -26,7 +27,18 @@ type AVDCrawler struct {
 }
 
 func NewAVDCrawler() Grabber {
-	client := NewHttpClient()
+	client := NewHttpClient().AddCommonRetryCondition(func(resp *req.Response, err error) bool {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return false
+			}
+			return true
+		}
+		if resp.StatusCode != 200 {
+			return true
+		}
+		return false
+	})
 	return &AVDCrawler{
 		client: client,
 		log:    golog.Child("[aliyun-avd]"),
@@ -66,6 +78,7 @@ func (a *AVDCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnInfo
 	sel := doc.Find("tbody > tr")
 	count := sel.Length()
 	if count == 0 {
+		a.log.Errorf("invalid response is \n%s", resp.Dump())
 		return nil, fmt.Errorf("goquery find zero vulns")
 	}
 	a.log.Infof("page %d contains %d vulns", page, count)

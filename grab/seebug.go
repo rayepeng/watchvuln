@@ -1,283 +1,309 @@
 package grab
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"io/ioutil"
-	"log"
-	"net/url"
-	"os"
-	"time"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/chromedp"
+	"github.com/PuerkitoBio/goquery"
+	"github.com/dop251/goja"
+	"github.com/dop251/goja_nodejs/eventloop"
 	"github.com/imroc/req/v3"
 	"github.com/kataras/golog"
+	"github.com/pkg/errors"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
 )
 
-var (
-	opts = append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.Flag("headless", true), // 设置为false以取消无头模式
-		chromedp.Flag("disable-gpu", true),
-		chromedp.Flag("enable-automation", true),
-		chromedp.Flag("disable-extensions", true),
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-software-rasterizer", true),
-		chromedp.Flag("disable-popup-blocking", true),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"),
-		chromedp.Flag("blink-settings", "imagesEnabled=false"),
-		chromedp.Flag("disable-javascript", true),
-		chromedp.Flag("no-first-run", true),
-		chromedp.Flag("no-default-browser-check", true),
-		chromedp.Flag("disable-translate", true),
-		chromedp.Flag("disable-popup-blocking", true),
-		chromedp.Flag("disable-notifications", true),
-		chromedp.Flag("disable-web-security", true),
-	)
-)
-
-// TODO: 这个函数可能有bug，资源不一定释放掉 加个err
-// func NewChromedpInstance() context.Context {
-// 	once.Do(func() {
-// 		instanceMutex.Lock()
-// 		defer instanceMutex.Unlock()
-
-// userDataDir, err := ioutil.TempDir("", "chromedp_example")
-// if err != nil {
-// 	log.Fatal(err)
-// }
-// 		opts := append(chromedp.DefaultExecAllocatorOptions[:],
-// 			chromedp.NoFirstRun,
-// 			chromedp.NoDefaultBrowserCheck,
-// 			chromedp.Flag("headless", true), // 设置为false以取消无头模式
-// 			chromedp.Flag("disable-gpu", true),
-// 			chromedp.Flag("enable-automation", true),
-// 			chromedp.Flag("disable-extensions", true),
-// 			chromedp.Flag("disable-dev-shm-usage", true),
-// 			chromedp.Flag("disable-software-rasterizer", true),
-// 			chromedp.Flag("disable-popup-blocking", true),
-// 			chromedp.Flag("disable-blink-features", "AutomationControlled"),
-// 			chromedp.UserDataDir(""),
-// chromedp.UserDataDir(userDataDir),
-// 			chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"),
-// 		)
-// allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-// ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-// ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
-// 		instance = ctx
-// 		// 在程序退出时取消context
-// 		go func() {
-// 			<-ctx.Done()
-// 			cancel()
-// 			os.RemoveAll(userDataDir)
-// 		}()
-// 	})
-
-// 	return instance
-// }
-
-type SeeBugCrawler struct {
+type SeebugCrawler struct {
 	client *req.Client
 	log    *golog.Logger
+	mu     sync.Mutex
 }
 
-func NewSeeBugCrawler() Grabber {
-	client := NewHttpClient()
-	return &SeeBugCrawler{
-		client: client,
-		log:    golog.Child("[seebug-avd]"),
+func NewSeebugCrawler() Grabber {
+	c := &SeebugCrawler{
+		log: golog.Child("[seebug]"),
 	}
+	c.client = c.newClient()
+	c.client.AddCommonRetryCondition(func(resp *req.Response, err error) bool {
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return false
+			}
+			return true
+		}
+		if resp.StatusCode != 200 {
+			return true
+		}
+		return false
+	}).AddCommonRetryHook(func(resp *req.Response, err error) {
+		if err != nil {
+			return
+		}
+		if resp.StatusCode != 200 {
+			c.log.Warnf("computing cloud waf cookie")
+			if err := c.wafBypass(resp.Request.Context()); err != nil {
+				resp.Err = err
+				c.log.Errorf("bypass waf error, %s", err)
+			}
+		}
+	})
+	return c
 }
-func (a *SeeBugCrawler) ProviderInfo() *Provider {
+
+func (t *SeebugCrawler) ProviderInfo() *Provider {
 	return &Provider{
-		Name:        "seebug-avd",
-		DisplayName: "seebug",
-		Link:        "https://www.seebug.org/vuldb/vulnerabilities",
+		Name:        "seebug",
+		DisplayName: "Seebug 漏洞平台",
+		Link:        "https://www.seebug.org",
 	}
 }
-func (a *SeeBugCrawler) GetPageCount(ctx context.Context, _ int) (int, error) {
-	u := `https://www.seebug.org/vuldb/vulnerabilities`
-	userDataDir, err := ioutil.TempDir("", "chromedp_example")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(userDataDir)
-	opts = append(opts, chromedp.UserDataDir(userDataDir))
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-	defer cancel()
-	instance, cancel = context.WithTimeout(instance, 30*time.Second)
-	defer cancel()
-	var page_count []*cdp.Node
-	err = chromedp.Run(instance,
-		chromedp.Navigate(u),
-		chromedp.WaitVisible(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, chromedp.BySearch),
-		chromedp.Nodes(`/html/body/div[2]/div/div/nav/ul/li[last()-1]/a/text()`, &page_count, chromedp.BySearch),
-	)
+
+func (t *SeebugCrawler) GetPageCount(ctx context.Context, size int) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	resp, err := t.client.R().SetContext(ctx).Get("https://www.seebug.org/vuldb/vulnerabilities")
 	if err != nil {
 		return 0, err
 	}
-	// results := page_count[0].NodeValue
-	return 10, nil
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Bytes()))
+	if err != nil {
+		return 0, err
+	}
+	sel := doc.Find("ul.pagination li")
+	if sel.Length() < 3 {
+		return 0, fmt.Errorf("failed to get pagination node")
+	}
+	last := sel.Last().Prev()
+	count := last.Text()
+	c, err := strconv.Atoi(strings.TrimSpace(count))
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to parse page count")
+	}
+	if c <= 0 {
+		return 0, fmt.Errorf("negative page count")
+	}
+	return c, nil
 }
 
-func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnInfo, error) {
+func (t *SeebugCrawler) ParsePage(ctx context.Context, page, size int) (chan *VulnInfo, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	u := fmt.Sprintf("https://www.seebug.org/vuldb/vulnerabilities?page=%d", page)
-	a.log.Infof("parsing page %s", u)
-	userDataDir, err := ioutil.TempDir("", "chromedp_example")
+	t.log.Infof("parsing page %s", u)
+	resp, err := t.client.R().SetContext(ctx).Get(u)
 	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(userDataDir)
-	opts = append(opts, chromedp.UserDataDir(userDataDir))
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-	defer cancel()
-	instance, cancel = context.WithTimeout(instance, 120*time.Second)
-	defer cancel()
-	var nodes []*cdp.Node
-	err = chromedp.Run(instance,
-		chromedp.Navigate("https://www.seebug.org/vuldb/vulnerabilities"),
-		chromedp.WaitVisible(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, chromedp.BySearch),
-		chromedp.Nodes(`/html/body/div[2]/div/div/div/div/table/tbody/tr[*]/td[4]/a`, &nodes, chromedp.BySearch),
-	)
-	if err != nil {
-		a.log.Errorf("parsing %s page error %s", u, err.Error())
 		return nil, err
 	}
-	var hrefs []string
-	for _, node := range nodes {
-		href := node.AttributeValue("href")
-		if href != "" {
-			hrefs = append(hrefs, href)
-		}
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(resp.Bytes()))
+	if err != nil {
+		return nil, err
 	}
-	a.log.Infof("parsing %s page succeed", u)
+	sel := doc.Find(".sebug-table tbody tr")
+	count := sel.Length()
+	if count == 0 {
+		t.log.Errorf("invalid response\n%s", resp.Dump())
+		return nil, fmt.Errorf("goquery find zero vulns")
+	}
+	t.log.Infof("page %d contains %d vulns", page, count)
+
+	var vulnInfo []*VulnInfo
+	for i := 0; i < count; i++ {
+		tds := sel.Eq(i).Find("td")
+		if tds.Length() != 6 {
+			return nil, fmt.Errorf("tag count does not match")
+		}
+
+		idTag := tds.Eq(0).Find("a")
+		href, _ := idTag.Attr("href")
+		href = strings.TrimSpace(href)
+		if href != "" {
+			href = "https://www.seebug.org" + href
+		}
+		uniqueKey := idTag.Text()
+		uniqueKey = strings.TrimSpace(uniqueKey)
+
+		disclosure := tds.Eq(1).Text()
+		disclosure = strings.TrimSpace(disclosure)
+
+		severityTitle, _ := tds.Eq(2).Find("div").Attr("data-original-title")
+		severityTitle = strings.TrimSpace(severityTitle)
+		var severity SeverityLevel
+		severity = Low
+		switch severityTitle {
+		case "高危":
+			severity = High
+		case "中危":
+			severity = Medium
+		case "低危":
+			severity = Low
+		}
+
+		title := tds.Eq(3).Text()
+		title = strings.TrimSpace(title)
+
+		cveId, _ := tds.Eq(4).Find("i.fa-id-card").Attr("data-original-title")
+		cveId = strings.TrimSpace(cveId)
+		if strings.Contains(cveId, "、") {
+			cveId = strings.Split(cveId, "、")[0]
+		}
+		if !cveIDRegexp.MatchString(cveId) {
+			cveId = ""
+		}
+
+		var tags []string
+		tag, _ := tds.Eq(4).Find("i.fa-file-text-o").Attr("data-original-title")
+		tag = strings.TrimSpace(tag)
+		if tag == "有详情" {
+			tags = append(tags, "有详情")
+		}
+
+		vulnInfo = append(vulnInfo, &VulnInfo{
+			UniqueKey:   uniqueKey,
+			Title:       title,
+			Description: "",
+			Severity:    severity,
+			CVE:         cveId,
+			Disclosure:  disclosure,
+			References:  nil,
+			Tags:        tags,
+			Solutions:   "",
+			From:        href,
+			Creator:     t,
+		})
+	}
 	results := make(chan *VulnInfo, 1)
 	go func() {
 		defer close(results)
-		for _, href := range hrefs {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			base, _ := url.Parse("https://www.seebug.org/")
-			uri, err := url.ParseRequestURI(href)
-			if err != nil {
-				a.log.Errorf("%s", err)
-				return
-			}
-			vulnLink := base.ResolveReference(uri).String()
-			avdInfo, err := a.parseSingle(ctx, vulnLink)
-			if err != nil {
-				a.log.Errorf("%s %s", err, vulnLink)
-				return
-			}
-			results <- avdInfo
+		for _, v := range vulnInfo {
+			results <- v
 		}
 	}()
-
 	return results, nil
 }
 
-func (a *SeeBugCrawler) IsValuable(info *VulnInfo) bool {
+func (t *SeebugCrawler) IsValuable(info *VulnInfo) bool {
 	return info.Severity == High || info.Severity == Critical
 }
 
-func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*VulnInfo, error) {
-	a.log.Infof("parsing vuln %s", vulnLink)
-	// resp, err := a.client.R().SetContext(ctx).Get(vulnLink)
-	userDataDir, err := ioutil.TempDir("", "chromedp_example")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.RemoveAll(userDataDir)
-	opts = append(opts, chromedp.UserDataDir(userDataDir))
-	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
-	defer cancel()
-	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
-	defer cancel()
-	instance, cancel = context.WithTimeout(instance, 60*time.Second)
-	defer cancel()
-	var title_node []*cdp.Node
-	var description_node []*cdp.Node
-	var cveID_node []*cdp.Node
-	var level_node []*cdp.Node
-	// var disclosure_node []*cdp.Node
-	var avd_node []*cdp.Node
-	var refs_node []*cdp.Node
-	var tags_node []*cdp.Node
+func (t *SeebugCrawler) newClient() *req.Client {
+	jar, _ := cookiejar.New(nil)
+	client := NewHttpClient().
+		SetCookieJar(jar).
+		SetCommonHeader("Referer", "https://www.seebug.org/")
+	return client
+}
 
-	err = chromedp.Run(instance,
-		chromedp.Navigate(vulnLink),
-		chromedp.WaitVisible(`//*[@id="j-vul-title"]/span`, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-vul-title"]/span/text()`, &title_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-affix-target"]/div[2]/div[1]/section[2]/div[2]/div[2]/p[2]/text()`, &description_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[3]/dl[1]/dd/a/text()`, &cveID_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[4]/dd/div`, &level_node, chromedp.BySearch), // 解析 data-original-title
-		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[3]/dl[1]/dd/a/text()`, &cveID_node, chromedp.BySearch),
-		// chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[3]/dd/text()`, &disclosure_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[1]/dd/a/text()`, &avd_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-affix-target"]/div[2]/div[1]/section[4]/div/div/div/ul/li[*]/a/text()`, &refs_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[2]/dl[1]/dd/a/text()`, &tags_node, chromedp.BySearch),
-	)
+var scriptRegexp = regexp.MustCompile(`(?m)<script>(.*?)</script>`)
 
-	if err != nil {
-		a.log.Errorf("parsing vulnlink error %s", vulnLink)
-	}
-	//TODO： 继续解析
+func (t *SeebugCrawler) wafBypass(ctx context.Context) error {
+	jar, _ := cookiejar.New(nil)
+	client := t.newClient().SetCookieJar(jar)
 
-	title := ""
-	description := ""
-	fixSteps := ""
-	level := ""
-	cveID := ""
-	// disclosure := ""
-	avd := ""
-	var refs []string
-
-	title = title_node[0].NodeValue
-	description = description_node[0].NodeValue
-	level = level_node[0].AttributeValue("data-original-title")
-	cveID = cveID_node[0].NodeValue
-	// disclosure = disclosure_node[0].NodeValue
-	avd = avd_node[0].NodeValue
-	for _, ref := range refs_node {
-		ref_link := ref.NodeValue
-		if ref_link != "" {
-			refs = append(refs, ref_link)
+	getScriptContent := func() (*req.Response, string, error) {
+		resp, err := client.NewRequest().SetContext(ctx).Get("https://www.seebug.org/")
+		if err != nil {
+			return nil, "", err
 		}
+		// get scripts content
+		matches := scriptRegexp.FindStringSubmatch(resp.String())
+		if len(matches) != 2 {
+			return nil, "", fmt.Errorf("invalid response, %s", resp.String())
+		}
+		return resp, matches[1], nil
 	}
 
-	severity := Low
-	switch level {
-	case "低危":
-		severity = Low
-	case "中危":
-		severity = Medium
-	case "高危":
-		severity = High
-	case "严重":
-		severity = Critical
+	window := map[string]interface{}{
+		"navigator": map[string]interface{}{
+			"userAgent": t.client.Headers.Get("User-Agent"),
+		},
+	}
+	document := map[string]interface{}{
+		"cookie": "",
+	}
+	location := map[string]interface{}{}
+
+	loop := eventloop.NewEventLoop()
+	defer loop.StopNoWait()
+	go func() {
+		<-ctx.Done()
+		loop.StopNoWait()
+	}()
+
+	loop.Run(func(vm *goja.Runtime) {
+		globals := vm.GlobalObject()
+		_ = globals.Set("window", window)
+		_ = globals.Set("document", document)
+		_ = globals.Set("location", location)
+	})
+	_, scripts, err := getScriptContent()
+	if err != nil {
+		return err
 	}
 
-	data := &VulnInfo{
-		UniqueKey:   avd,
-		Title:       title,
-		Description: description,
-		Severity:    severity,
-		CVE:         cveID,
-		Disclosure:  "",
-		References:  refs,
-		Solutions:   fixSteps,
-		From:        vulnLink,
-		Creator:     a,
+	loop.Run(func(runtime *goja.Runtime) {
+		_, err = runtime.RunScript("waf1.js", scripts)
+		if err != nil {
+			t.log.Error(err)
+		}
+	})
+	if err != nil {
+		return err
 	}
-	return data, nil
+
+	// got computed cookie, like __jsl_clearance_s=1682243210.209|-1|rH5ImJeO2qt0QSZPgIZw4vndVsw%3D;max-age=3600;path=/
+	// insert to cookiejar
+	cookies, err := t.getCookieFromDocument(document)
+	if err != nil {
+		return err
+	}
+	u, err := url.Parse("https://www.seebug.org/")
+	jar.SetCookies(u, cookies)
+
+	// resend request, get the second script
+	_, scripts, err = getScriptContent()
+	if err != nil {
+		return nil
+	}
+	cookieStr := ""
+	for _, cookie := range jar.Cookies(u) {
+		cookieStr += fmt.Sprintf("%s=%s; ", cookie.Name, cookie.Value)
+	}
+	document["cookie"] = cookieStr
+
+	loop.Run(func(runtime *goja.Runtime) {
+		_, err = runtime.RunScript("waf2.js", scripts)
+		if err != nil {
+			t.log.Error(err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	cookies, err = t.getCookieFromDocument(document)
+	if err != nil {
+		return err
+	}
+	jar.SetCookies(u, cookies)
+	t.client.SetCookieJar(jar)
+	return ctx.Err()
+}
+
+func (t *SeebugCrawler) getCookieFromDocument(doc map[string]interface{}) ([]*http.Cookie, error) {
+	cookieStr, ok := doc["cookie"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid cookie value, %+v", doc)
+	}
+	cookieHelper := &http.Response{
+		Header: map[string][]string{"Set-Cookie": {cookieStr}},
+	}
+	cookies := cookieHelper.Cookies()
+	return cookies, nil
 }
