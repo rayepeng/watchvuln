@@ -6,9 +6,6 @@ require (
 	entgo.io/ent v0.12.0
 	github.com/CatchZeng/dingtalk v1.5.0
 	github.com/PuerkitoBio/goquery v1.8.1
-	github.com/chromedp/cdproto v0.0.0-20230408222125-26b95782d8e2
-	github.com/chromedp/chromedp v0.9.1
-	github.com/imroc/req/v3 v3.33.1
 	github.com/dop251/goja v0.0.0-20230402114112-623f9dda9079
 	github.com/dop251/goja_nodejs v0.0.0-20230322100729-2550c7b6c124
 	github.com/imroc/req/v3 v3.33.2
@@ -29,36 +26,22 @@ require (
 	github.com/agext/levenshtein v1.2.3 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
-	github.com/chromedp/sysutil v1.0.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dlclark/regexp2 v1.9.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
-<<<<<<< HEAD
-	github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0 // indirect
-	github.com/gobwas/httphead v0.1.0 // indirect
-	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.1.0 // indirect
-=======
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
->>>>>>> remotes/upstream/main
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/pprof v0.0.0-20230406165453-00490a63f317 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
-<<<<<<< HEAD
-	github.com/hashicorp/hcl/v2 v2.13.0 // indirect
-	github.com/josharian/intern v1.0.0 // indirect
-=======
 	github.com/hashicorp/hcl/v2 v2.16.2 // indirect
->>>>>>> remotes/upstream/main
 	github.com/kataras/pio v0.0.11 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
-	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.18 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/onsi/ginkgo/v2 v2.9.2 // indirect
