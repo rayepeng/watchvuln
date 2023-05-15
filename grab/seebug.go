@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
@@ -28,8 +27,15 @@ var (
 		chromedp.Flag("disable-software-rasterizer", true),
 		chromedp.Flag("disable-popup-blocking", true),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.UserDataDir(""),
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36"),
+		chromedp.Flag("blink-settings", "imagesEnabled=false"),
+		chromedp.Flag("disable-javascript", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("no-default-browser-check", true),
+		chromedp.Flag("disable-translate", true),
+		chromedp.Flag("disable-popup-blocking", true),
+		chromedp.Flag("disable-notifications", true),
+		chromedp.Flag("disable-web-security", true),
 	)
 )
 
@@ -115,8 +121,8 @@ func (a *SeeBugCrawler) GetPageCount(ctx context.Context, _ int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	results := page_count[0].NodeValue
-	return strconv.Atoi(results)
+	// results := page_count[0].NodeValue
+	return 10, nil
 }
 
 func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnInfo, error) {
@@ -132,7 +138,7 @@ func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnI
 	defer cancel()
 	instance, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
 	defer cancel()
-	instance, cancel = context.WithTimeout(instance, 60*time.Second)
+	instance, cancel = context.WithTimeout(instance, 120*time.Second)
 	defer cancel()
 	var nodes []*cdp.Node
 	err = chromedp.Run(instance,
@@ -151,6 +157,7 @@ func (a *SeeBugCrawler) ParsePage(ctx context.Context, page, _ int) (chan *VulnI
 			hrefs = append(hrefs, href)
 		}
 	}
+	a.log.Infof("parsing %s page succeed", u)
 	results := make(chan *VulnInfo, 1)
 	go func() {
 		defer close(results)
@@ -184,7 +191,7 @@ func (a *SeeBugCrawler) IsValuable(info *VulnInfo) bool {
 }
 
 func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*VulnInfo, error) {
-	a.log.Debugf("parsing vuln %s", vulnLink)
+	a.log.Infof("parsing vuln %s", vulnLink)
 	// resp, err := a.client.R().SetContext(ctx).Get(vulnLink)
 	userDataDir, err := ioutil.TempDir("", "chromedp_example")
 	if err != nil {
@@ -202,7 +209,7 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 	var description_node []*cdp.Node
 	var cveID_node []*cdp.Node
 	var level_node []*cdp.Node
-	var disclosure_node []*cdp.Node
+	// var disclosure_node []*cdp.Node
 	var avd_node []*cdp.Node
 	var refs_node []*cdp.Node
 	var tags_node []*cdp.Node
@@ -215,14 +222,14 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[3]/dl[1]/dd/a/text()`, &cveID_node, chromedp.BySearch),
 		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[4]/dd/div`, &level_node, chromedp.BySearch), // 解析 data-original-title
 		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[3]/dl[1]/dd/a/text()`, &cveID_node, chromedp.BySearch),
-		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[3]/dd/text()`, &disclosure_node, chromedp.BySearch),
+		// chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[3]/dd/text()`, &disclosure_node, chromedp.BySearch),
 		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[1]/dl[1]/dd/a/text()`, &avd_node, chromedp.BySearch),
 		chromedp.Nodes(`//*[@id="j-affix-target"]/div[2]/div[1]/section[4]/div/div/div/ul/li[*]/a/text()`, &refs_node, chromedp.BySearch),
 		chromedp.Nodes(`//*[@id="j-vul-basic-info"]/div/div[2]/dl[1]/dd/a/text()`, &tags_node, chromedp.BySearch),
 	)
 
 	if err != nil {
-		panic(err)
+		a.log.Errorf("parsing vulnlink error %s", vulnLink)
 	}
 	//TODO： 继续解析
 
@@ -231,7 +238,7 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 	fixSteps := ""
 	level := ""
 	cveID := ""
-	disclosure := ""
+	// disclosure := ""
 	avd := ""
 	var refs []string
 
@@ -239,7 +246,7 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 	description = description_node[0].NodeValue
 	level = level_node[0].AttributeValue("data-original-title")
 	cveID = cveID_node[0].NodeValue
-	disclosure = disclosure_node[0].NodeValue
+	// disclosure = disclosure_node[0].NodeValue
 	avd = avd_node[0].NodeValue
 	for _, ref := range refs_node {
 		ref_link := ref.NodeValue
@@ -266,7 +273,7 @@ func (a *SeeBugCrawler) parseSingle(ctx context.Context, vulnLink string) (*Vuln
 		Description: description,
 		Severity:    severity,
 		CVE:         cveID,
-		Disclosure:  disclosure,
+		Disclosure:  "",
 		References:  refs,
 		Solutions:   fixSteps,
 		From:        vulnLink,
